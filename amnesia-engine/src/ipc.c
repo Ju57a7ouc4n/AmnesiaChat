@@ -1,4 +1,5 @@
 #include "ipc.h"
+#include <sodium.h>
 
 int ipc_read_command(ParsedCommand* cmd) {
     char buffer[MAX_IPC_BUFFER];
@@ -35,6 +36,8 @@ int ipc_read_command(ParsedCommand* cmd) {
     else if (strcmp(cmd_str, "PANIC") == 0) cmd->type = CMD_PANIC;
     else if (strcmp(cmd_str, "FARO") == 0) cmd->type = CMD_START_FARO;
     
+
+    sodium_memzero(buffer, sizeof(buffer));
     return 1;
 }
 

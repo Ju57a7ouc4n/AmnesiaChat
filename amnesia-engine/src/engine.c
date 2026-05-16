@@ -161,9 +161,14 @@ void engine_handle_ipc(ParsedCommand* cmd) {
             if (s_idx != -1) {
                 newMessage(sessions[s_idx].arena, cmd->payload);
                 
-                netty_send_data(sessions[s_idx].sock_fd, (const unsigned char*)cmd->payload, strlen(cmd->payload));
+                unsigned char net_buffer[1024];
+                size_t net_len = 0;
                 
-                ipc_send_response("SEND_OK", cmd->chat_id, "STORED_AND_SENT");
+                if (encryptNetMessage(sessions[s_idx].arena, cmd->payload, net_buffer, &net_len) == 0) {
+                    // ¡AHORA SÍ mandamos el buffer ilegible!
+                    netty_send_data(sessions[s_idx].sock_fd, net_buffer, net_len);
+                    ipc_send_response("SEND_OK", cmd->chat_id, "STORED_AND_SENT");
+                }
             }
             break;
 
@@ -185,13 +190,16 @@ void engine_handle_net(int sock_fd, const unsigned char* data, size_t len) {
 
     int s_idx = find_session_by_sock(sock_fd);
     if (s_idx != -1) {
-        
         char plain_text[512] = {0};
-        strncpy(plain_text, (const char*)data, len < 511 ? len : 511);
-
-        newMessage(sessions[s_idx].arena, plain_text);
-
-        ipc_send_response("INC_MSG", sessions[s_idx].chat_id, "NEW_MESSAGE_IN_VAULT");
+        
+        if (decryptNetMessage(sessions[s_idx].arena, data, len, plain_text) == 0) {
+            
+            newMessage(sessions[s_idx].arena, plain_text);
+ 
+            ipc_send_response("INC_MSG", sessions[s_idx].chat_id, plain_text);
+        } else {
+            ipc_log_error("DECRYPT_NETWORK_FAILED");
+        }
     }
 }
 

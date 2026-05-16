@@ -105,3 +105,44 @@ void getChatHistory(ChatArena* chat, void (*on_msg_decrypted)(const char*, int))
         }
     }
 }
+
+int encryptNetMessage(ChatArena* chat, const char* plaintext, unsigned char* out_buffer, size_t* out_len) {
+    if (chat == NULL || plaintext == NULL || out_buffer == NULL) return -1;
+    
+    size_t pt_len = strlen(plaintext);
+    
+    randombytes_buf(out_buffer, crypto_secretbox_NONCEBYTES);
+    
+
+    crypto_secretbox_easy(
+        out_buffer + crypto_secretbox_NONCEBYTES, 
+        (const unsigned char*)plaintext, 
+        pt_len, 
+        out_buffer,
+        chat->shared_secret
+    );
+    
+    *out_len = crypto_secretbox_NONCEBYTES + pt_len + crypto_secretbox_MACBYTES;
+    return 0;
+}
+
+int decryptNetMessage(ChatArena* chat, const unsigned char* in_buffer, size_t in_len, char* out_plaintext) {
+    if (chat == NULL || in_buffer == NULL || out_plaintext == NULL) return -1;
+    
+    if (in_len < crypto_secretbox_NONCEBYTES + crypto_secretbox_MACBYTES) return -1;
+    
+    const unsigned char* nonce = in_buffer;
+    const unsigned char* ciphertext = in_buffer + crypto_secretbox_NONCEBYTES;
+    size_t ct_len = in_len - crypto_secretbox_NONCEBYTES;
+    if (crypto_secretbox_open_easy(
+        (unsigned char*)out_plaintext, 
+        ciphertext, 
+        ct_len, 
+        nonce, 
+        chat->shared_secret) != 0) {
+        return -1;
+    }
+    
+    out_plaintext[ct_len - crypto_secretbox_MACBYTES] = '\0'; // Cerramos el string en C
+    return 0;
+}

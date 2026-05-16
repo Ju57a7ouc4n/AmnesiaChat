@@ -34,3 +34,7 @@ void endChat(ChatArena* chat);
 void getChatHistory(ChatArena* chat, void (*on_msg_decrypted)(const char*, int));
 
 void setSharedSecret(ChatArena* chat, const unsigned char* secret);
+
+int encryptNetMessage(ChatArena* chat, const char* plaintext, unsigned char* out_buffer, size_t* out_len);
+
+int decryptNetMessage(ChatArena* chat, const unsigned char* in_buffer, size_t in_len, char* out_plaintext);

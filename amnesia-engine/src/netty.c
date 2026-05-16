@@ -1,4 +1,5 @@
 #include "netty.h"
+#include "ipc.h"
 
 int netty_start_server(int port) {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -37,7 +38,6 @@ int netty_accept_client(int server_fd, char* client_ip) {
     if (client_fd >= 0 && client_ip != NULL) {
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
     }
-
     return client_fd;
 }
 
