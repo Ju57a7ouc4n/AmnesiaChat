@@ -18,6 +18,12 @@ public class EngineBridge {
     public void start(String enginePath) throws IOException {
         ProcessBuilder pb = new ProcessBuilder(enginePath);
         this.process = pb.start();
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (this.process != null && this.process.isAlive()) {
+                this.process.destroyForcibly();
+            }
+        }));
+        
         this.running = true;
         this.writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
         this.reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
@@ -83,4 +89,5 @@ public class EngineBridge {
     public void setListener(EngineListener e) {
     	this.listener = e;
     } 
+    
 }

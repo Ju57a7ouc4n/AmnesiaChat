@@ -10,6 +10,7 @@ void engine_init(void) {
         sessions[i].active = 0;
         sessions[i].sock_fd = -1;
         sessions[i].arena = NULL;
+        sessions[i].handshake_state = 0;
     }
 }
 
@@ -81,14 +82,16 @@ void engine_accept_faro(void) {
         uint32_t new_id = incoming_chat_counter++;
         pChat new_arena = newChat(new_id);
         
-        unsigned char dummy_key[32];
-        memset(dummy_key, 0xAA, 32); 
-        setSharedSecret(new_arena, dummy_key);
+        unsigned char pk[crypto_kem_mlkem768_PUBLICKEYBYTES];
+        crypto_kem_mlkem768_keypair(pk, sessions[slot].sk);
+
+        netty_send_data(new_sock, pk, sizeof(pk));
 
         sessions[slot].chat_id = new_id;
         sessions[slot].sock_fd = new_sock;
         sessions[slot].arena = new_arena;
         sessions[slot].active = 1;
+        sessions[slot].handshake_state = STATE_WAIT_CT; 
 
         ipc_send_response("INC_CHAT", new_id, client_ip);
     }
@@ -143,34 +146,35 @@ void engine_handle_ipc(ParsedCommand* cmd) {
                 ipc_log_error("RAM_LOCK_FAILED");
                 break;
             }
-
-            unsigned char dummy_key[32];
-            memset(dummy_key, 0xAA, 32); 
-            setSharedSecret(new_arena, dummy_key);
-
+        
             sessions[slot].chat_id = cmd->chat_id;
             sessions[slot].sock_fd = new_sock;
             sessions[slot].arena = new_arena;
             sessions[slot].active = 1;
-
-            ipc_send_response("NEW_OK", cmd->chat_id, "CONNECTED");
+            sessions[slot].handshake_state = STATE_WAIT_PK;
+        
+            ipc_send_response("NEW_OK", cmd->chat_id, "CONNECTED_WAITING_KEYS");
             break;
 
         case CMD_SEND_MSG:
             s_idx = find_session_by_id(cmd->chat_id);
             if (s_idx != -1) {
+                if (sessions[s_idx].handshake_state != STATE_READY) {
+                    ipc_log_error("HANDSHAKE_IN_PROGRESS");
+                    break;
+                }
+
                 newMessage(sessions[s_idx].arena, cmd->payload);
                 
                 unsigned char net_buffer[1024];
                 size_t net_len = 0;
                 
                 if (encryptNetMessage(sessions[s_idx].arena, cmd->payload, net_buffer, &net_len) == 0) {
-                    // ¡AHORA SÍ mandamos el buffer ilegible!
                     netty_send_data(sessions[s_idx].sock_fd, net_buffer, net_len);
                     ipc_send_response("SEND_OK", cmd->chat_id, "STORED_AND_SENT");
                 }
             }
-            break;
+            break;  
 
         case CMD_GET_HISTORY:
             s_idx = find_session_by_id(cmd->chat_id);
@@ -189,13 +193,55 @@ void engine_handle_net(int sock_fd, const unsigned char* data, size_t len) {
     if (data == NULL || len == 0) return;
 
     int s_idx = find_session_by_sock(sock_fd);
-    if (s_idx != -1) {
+    if (s_idx == -1) return;
+
+    if (sessions[s_idx].handshake_state == STATE_WAIT_PK) {
+        if (len < crypto_kem_mlkem768_PUBLICKEYBYTES) return;
+        
+        unsigned char ciphertext[crypto_kem_mlkem768_CIPHERTEXTBYTES];
+        unsigned char shared_secret[crypto_kem_mlkem768_SHAREDSECRETBYTES];
+
+        if (crypto_kem_mlkem768_enc(ciphertext, shared_secret, data) == 0) {
+            
+            setSharedSecret(sessions[s_idx].arena, shared_secret);
+            
+            netty_send_data(sock_fd, ciphertext, sizeof(ciphertext));
+            
+            sodium_memzero(shared_secret, sizeof(shared_secret));
+            sessions[s_idx].handshake_state = STATE_READY;
+            
+            ipc_send_response("SYS_MSG", sessions[s_idx].chat_id, "QUANTUM_HANDSHAKE_COMPLETE");
+        } else {
+            ipc_log_error("KEM_ENCAPSULATION_FAILED");
+        }
+        return;
+    }
+
+    if (sessions[s_idx].handshake_state == STATE_WAIT_CT) {
+        if (len < crypto_kem_mlkem768_CIPHERTEXTBYTES) return;
+        
+        unsigned char shared_secret[crypto_kem_mlkem768_SHAREDSECRETBYTES];
+
+        if (crypto_kem_mlkem768_dec(shared_secret, data, sessions[s_idx].sk) == 0) {
+            
+            setSharedSecret(sessions[s_idx].arena, shared_secret);
+            
+            sodium_memzero(sessions[s_idx].sk, sizeof(sessions[s_idx].sk));
+            sodium_memzero(shared_secret, sizeof(shared_secret));
+            
+            sessions[s_idx].handshake_state = STATE_READY;
+            ipc_send_response("SYS_MSG", sessions[s_idx].chat_id, "QUANTUM_HANDSHAKE_COMPLETE");
+        } else {
+            ipc_log_error("KEM_DECAPSULATION_FAILED");
+        }
+        return;
+    }
+
+    if (sessions[s_idx].handshake_state == STATE_READY) {
         char plain_text[512] = {0};
         
         if (decryptNetMessage(sessions[s_idx].arena, data, len, plain_text) == 0) {
-            
             newMessage(sessions[s_idx].arena, plain_text);
- 
             ipc_send_response("INC_MSG", sessions[s_idx].chat_id, plain_text);
         } else {
             ipc_log_error("DECRYPT_NETWORK_FAILED");

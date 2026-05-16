@@ -29,10 +29,6 @@ public class Controller implements EngineListener, ActionListener {
     public void setView(MainView v) {
         this.view = v;
     }
-    
-    public void setBridge(EngineBridge bridge) {
-        this.bridge = bridge;
-    }
 
     public void start() {
         view.setVisible(true);
@@ -67,15 +63,18 @@ public class Controller implements EngineListener, ActionListener {
                 }
             }
         }
+    	else if ("CMD_PANIC".equals(command)) {
+        bridge.sendCommand("PANIC|0|NOW");
     }
+}
 
     @Override
     public void onMessageReceived(String rawResponse) {
         javax.swing.SwingUtilities.invokeLater(() -> {
             processEngineCommand(rawResponse);
         });
-    }
-
+   	}
+    
     private void processEngineCommand(String rawResponse) {
         String[] parts = rawResponse.split("\\|", 3);
         if (parts.length < 3) return;
@@ -98,7 +97,9 @@ public class Controller implements EngineListener, ActionListener {
                 currentActiveChatId = chatId;
                 break;
             case "INC_MSG":
-                bridge.sendCommand("HIST|" + chatId + "|");
+                if (chatId == currentActiveChatId) {
+                    view.appendToChat("[Peer]: " + payload);
+                }
                 break;
             case "HIST_CHUNK":
                 if (chatId == currentActiveChatId) {
@@ -117,5 +118,10 @@ public class Controller implements EngineListener, ActionListener {
     public void onEngineClosed() {
         System.out.println("Engine Off.");
         System.exit(0);
+    }
+    
+    public void setBridge(EngineBridge bridge) {
+        this.bridge = bridge;
+        this.bridge.setListener(this); 
     }
 }

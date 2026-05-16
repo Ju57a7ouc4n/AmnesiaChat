@@ -15,7 +15,6 @@ int main(void) {
     core_limit.rlim_cur = 0;
     core_limit.rlim_max = 0;
 
-    // Desactivamos buffers para evitar copias ocultas en el Heap de glibc
     setvbuf(stdin, NULL, _IONBF, 0);
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
@@ -55,13 +54,11 @@ int main(void) {
             continue; 
         }
 
-        // Bloque corregido (sin duplicación)
         if (fds[0].revents & POLLIN) {
             ParsedCommand cmd;
             
             if (ipc_read_command(&cmd)) {
                 engine_handle_ipc(&cmd);
-                // Hardening: Borramos el comando de la pila inmediatamente
                 sodium_memzero(&cmd, sizeof(ParsedCommand));
             } else {
                 engine_panic();
@@ -76,7 +73,7 @@ int main(void) {
                 if (current_faro >= 0 && fds[i].fd == current_faro) {
                     engine_accept_faro();
                 } else {
-                    unsigned char net_buffer[1024];
+                    unsigned char net_buffer[4096];
                     int bytes = netty_read_data(fds[i].fd, net_buffer, sizeof(net_buffer));
                     
                     if (bytes > 0) {
